@@ -38,7 +38,7 @@
 
 ### 2. Клонирование репозитория
 ```bash
-git clone https://github.com/ponpensl/vk-backup.git
+git clone https://github.com/RABONCHIK/vk-backup.git
 cd vk-backup
 ```
 
