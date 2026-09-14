@@ -1,0 +1,49 @@
+# Конфигурация и секреты
+.env
+config.json
+*.token
+*cookie*.txt
+*cookie*.json
+
+# Локальные тестовые и служебные скрипты с приватными данными
+test_cookie.py
+auto_token.py
+test_auto_token.py
+test_chrome_auto.py
+test_playwright.py
+test_offline_token.py
+test_token_p.py
+test_token_refresh.py
+test_verified.py
+test_vk_me.py
+test_web_session.py
+test_web_token.py
+test_one_msg.py
+test_full.py
+run_auto_backup.py
+fix_downloaded.py
+refresh_chrome.py
+refresh.ps1
+reload.vbs
+reload2.vbs
+проверить_токен.py
+
+# Папки с выгруженными переписками и медиа
+vk_data/
+vk_backup_data/
+D:/vk_data/
+id*/
+browser_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Логи и временные файлы
+logs.txt
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
