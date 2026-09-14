@@ -1316,20 +1316,21 @@ def main():
     print("=" * 60)
 
     if not ACCESS_TOKEN:
-        print("\nКак получить токен:")
-        print("  1. Открой эту ссылку в браузере:")
-        print()
-        print("     https://oauth.vk.com/authorize?client_id=2685278"
-              "&scope=messages,photos,docs,offline"
-              "&redirect_uri=https://oauth.vk.com/blank.html"
-              "&display=page&response_type=token")
-        print()
-        print("  2. Войди в ВК → нажми «Разрешить»")
-        print("  3. Страница будет пустой — скопируй адрес из адресной строки")
-        print("  4. Найди access_token=XXXXXXXX и скопируй только токен (до &)")
-        print("     (можно вставить весь адрес — скрипт разберётся сам)")
-        print()
-        ACCESS_TOKEN = input("Вставь токен: ").strip()
+        # 1. Сначала пробуем найти токен автоматически в файлах Google Chrome на диске
+        cand = find_token_in_chrome_leveldb()
+        if cand:
+            ACCESS_TOKEN = cand
+            print("\n[✓] Рабочий веб-токен автоматически прочитан из Google Chrome!")
+        else:
+            print("\nКак получить токен (веб-сессия ВКонтакте):")
+            print("  1. Открой vk.com в браузере (где ты залогинен).")
+            print("  2. Нажми F12 → вкладка 'Сеть' (Network).")
+            print("  3. Нажми F5 или перейди в любой диалог.")
+            print("  4. Кликни правой кнопкой мыши по любому запросу 'method'/'im' → 'Копировать как cURL'.")
+            print("  5. Вставь cURL или токен сюда:\n")
+            raw_in = input("Вставь cURL или токен: ").strip()
+            cand_in = extract_token(raw_in)
+            ACCESS_TOKEN = cand_in if cand_in else raw_in
 
     # Достаем user_id из ссылки, если он там есть
     parsed_uid = None
