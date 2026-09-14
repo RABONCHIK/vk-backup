@@ -86,37 +86,95 @@ def get_clipboard_text() -> str:
     return ""
 
 
-def find_token_in_chrome_leveldb() -> str:
-    """Автоматически достает рабочий токен из хранилища Google Chrome на диске."""
+def find_token_in_browser_storage() -> str:
+    """
+    Автоматически достает рабочий токен из хранилища Google Chrome,
+    Яндекс.Браузера, Microsoft Edge, Opera, Brave на диске.
+    """
     import glob
     appdata = os.environ.get("LOCALAPPDATA", "")
-    for profile in ["Profile 1", "Default"]:
-        profile_dir = os.path.join(appdata, "Google", "Chrome", "User Data", profile, "Local Storage", "leveldb")
-        if not os.path.isdir(profile_dir):
+    appdata_roaming = os.environ.get("APPDATA", "")
+
+    browser_roots = [
+        # Google Chrome
+        os.path.join(appdata, "Google", "Chrome", "User Data"),
+        # Яндекс.Браузер
+        os.path.join(appdata, "Yandex", "YandexBrowser", "User Data"),
+        # Microsoft Edge
+        os.path.join(appdata, "Microsoft", "Edge", "User Data"),
+        # Opera / Opera GX
+        os.path.join(appdata_roaming, "Opera Software", "Opera Stable"),
+        os.path.join(appdata_roaming, "Opera Software", "Opera GX Stable"),
+        # Brave
+        os.path.join(appdata, "BraveSoftware", "Brave-Browser", "User Data"),
+        # Vivaldi
+        os.path.join(appdata, "Vivaldi", "User Data"),
+    ]
+
+    profiles = ["Default", "Profile 1", "Profile 2", "Profile 3", ""]
+    tokens = []
+
+    for base_dir in browser_roots:
+        if not os.path.isdir(base_dir):
             continue
-        tokens = []
-        for fpath in glob.glob(os.path.join(profile_dir, "*.*")):
-            try:
-                with open(fpath, "rb") as f:
-                    data = f.read()
-                for m in re.finditer(b"vk1\\.a\\.[a-zA-Z0-9_\\-]+", data):
-                    tok = m.group(0).decode("ascii")
-                    if len(tok) > 100 and tok != ACCESS_TOKEN and tok not in [t[1] for t in tokens]:
-                        tokens.append((os.path.getmtime(fpath), tok))
-            except Exception:
-                pass
-        tokens.sort(key=lambda x: x[0], reverse=True)
-        for mtime, tok in tokens:
-            data_enc = urllib.parse.urlencode({"v": API_VERSION, "client_id": 6287487, "access_token": tok}).encode()
-            req = urllib.request.Request(f"{API_BASE}users.get", data=data_enc)
-            try:
-                with urllib.request.urlopen(req, context=_SSL_CTX, timeout=3) as r:
-                    res = r.read().decode("utf-8")
-                    if "response" in res and "error" not in res:
-                        return tok
-            except Exception:
-                pass
+        for prof in profiles:
+            p_dir = os.path.join(base_dir, prof, "Local Storage", "leveldb") if prof else os.path.join(base_dir, "Local Storage", "leveldb")
+            if not os.path.isdir(p_dir):
+                continue
+            for fpath in glob.glob(os.path.join(p_dir, "*.*")):
+                try:
+                    with open(fpath, "rb") as f:
+                        data = f.read()
+                    for m in re.finditer(b"vk1\\.a\\.[a-zA-Z0-9_\\-]+", data):
+                        tok = m.group(0).decode("ascii")
+                        if len(tok) > 100 and tok != ACCESS_TOKEN and tok not in [t[1] for t in tokens]:
+                            tokens.append((os.path.getmtime(fpath), tok))
+                except Exception:
+                    pass
+
+    tokens.sort(key=lambda x: x[0], reverse=True)
+    for mtime, tok in tokens:
+        data_enc = urllib.parse.urlencode({"v": API_VERSION, "client_id": 6287487, "access_token": tok}).encode()
+        req = urllib.request.Request(f"{API_BASE}users.get", data=data_enc)
+        try:
+            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=3) as r:
+                res = r.read().decode("utf-8")
+                if "response" in res and "error" not in res:
+                    return tok
+        except Exception:
+            pass
     return ""
+
+
+# Алиас для обратной совместимости
+find_token_in_chrome_leveldb = find_token_in_browser_storage
+
+
+def trigger_browser_refresh() -> bool:
+    """
+    Отправляет сигнал F5 в окно открытого браузера (Chrome, Яндекс, Edge, Opera)
+    через Windows Shell, чтобы браузер без участия пользователя обновил вкладку и записал свежий токен.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import subprocess
+        ps_cmd = '''
+        $wsh = New-Object -ComObject WScript.Shell
+        $browsers = @("Google Chrome", "Chrome", "Yandex", "Яндекс", "Edge", "Microsoft Edge", "Opera")
+        foreach ($b in $browsers) {
+            if ($wsh.AppActivate($b)) {
+                Start-Sleep -Milliseconds 300
+                $wsh.SendKeys("{F5}")
+                exit 0
+            }
+        }
+        exit 1
+        '''
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=3)
+        return res.returncode == 0
+    except Exception:
+        return False
 
 
 _last_call = 0.0
@@ -169,13 +227,24 @@ def api(method: str, **params) -> dict:
                 time.sleep(wait_flood)
                 continue
             elif code == 5 and ("expired" in msg.lower() or "authorization failed" in msg.lower()):
-                # Сначала пробуем достать свежий токен напрямую из Google Chrome на диске!
-                cand = find_token_in_chrome_leveldb()
-                if cand:
+                # 1. Сначала пробуем достать свежий токен из хранилища браузеров на диске
+                cand = find_token_in_browser_storage()
+                if cand and cand != ACCESS_TOKEN:
                     ACCESS_TOKEN = cand
                     params["access_token"] = ACCESS_TOKEN
-                    print(f"\n  [✓] Свежий токен автоматически прочитан из Google Chrome на диске!")
+                    print(f"\n  [✓] Свежий токен автоматически прочитан из браузера на диске!")
                     continue
+
+                # 2. Пробуем автоматически обновить вкладку в открытом браузере (Chrome / Яндекс / Edge)
+                print(f"\n  [i] Токен истёк (15 мин). Отправляю команду обновления в браузер…")
+                if trigger_browser_refresh():
+                    time.sleep(3)  # Ждем перезагрузки вкладки и записи токена в leveldb
+                    cand = find_token_in_browser_storage()
+                    if cand and cand != ACCESS_TOKEN:
+                        ACCESS_TOKEN = cand
+                        params["access_token"] = ACCESS_TOKEN
+                        print(f"  [✓] Вкладка в браузере обновлена! Новый токен автоматически подхвачен!\n")
+                        continue
 
                 try:
                     import winsound
@@ -184,9 +253,9 @@ def api(method: str, **params) -> dict:
                     pass
                 print(f"\n\n{'!'*60}")
                 print("  [🔔 ВНИМАНИЕ] Токен истёк (прошло 15 минут)!")
-                print("  1. Сделай 1 клик F5 в браузере")
-                print("  2. В DevTools нажми: 'Копировать как cURL' (Copy as cURL)")
-                print("  [i] Скрипт САМ подхватит токен из буфера обмена!")
+                print("  1. Сделай 1 клик F5 на странице vk.com в браузере")
+                print("  2. Или в DevTools нажми: 'Копировать как cURL'")
+                print("  [i] Скрипт САМ подхватит токен из браузера или буфера обмена!")
                 print("      (В терминал вставлять ничего не нужно!)")
                 print(f"{'!'*60}")
                 
@@ -194,12 +263,12 @@ def api(method: str, **params) -> dict:
                 found_token = ""
                 
                 for wait_step in range(300):
-                    # Проверяем файлы Chrome на диске каждые 5 секунд
-                    if wait_step % 5 == 0:
-                        cand_db = find_token_in_chrome_leveldb()
+                    # Проверяем файлы браузеров на диске каждые 4 секунды
+                    if wait_step % 4 == 0:
+                        cand_db = find_token_in_browser_storage()
                         if cand_db and cand_db != ACCESS_TOKEN:
                             found_token = cand_db
-                            print(f"\n  [✓] Свежий токен автоматически прочитан из файлов Google Chrome!")
+                            print(f"\n  [✓] Свежий токен автоматически прочитан из файлов браузера!")
                             break
 
                     clip = get_clipboard_text()
@@ -1316,11 +1385,11 @@ def main():
     print("=" * 60)
 
     if not ACCESS_TOKEN:
-        # 1. Сначала пробуем найти токен автоматически в файлах Google Chrome на диске
-        cand = find_token_in_chrome_leveldb()
+        # 1. Сначала пробуем найти токен автоматически в браузерах (Chrome, Яндекс, Edge, Opera)
+        cand = find_token_in_browser_storage()
         if cand:
             ACCESS_TOKEN = cand
-            print("\n[✓] Рабочий веб-токен автоматически прочитан из Google Chrome!")
+            print("\n[✓] Рабочий веб-токен автоматически прочитан из браузера (Chrome/Яндекс/Edge)!")
         else:
             print("\nКак получить токен (веб-сессия ВКонтакте):")
             print("  1. Открой vk.com в браузере (где ты залогинен).")
@@ -1369,6 +1438,12 @@ def main():
 
     if not my_id:
         sys.exit("Не удалось определить ID пользователя.")
+
+    print("\nКуда сохранять скачанные переписки?")
+    print(f"  [По умолчанию: {OUTPUT_DIR}]")
+    custom_dir = input("  Введи путь к папке (или нажми Enter): ").strip()
+    if custom_dir:
+        OUTPUT_DIR = custom_dir.strip('"\'')
 
     base_dir = Path(OUTPUT_DIR) / f"id{my_id}"
     base_dir.mkdir(parents=True, exist_ok=True)
